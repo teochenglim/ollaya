@@ -82,7 +82,7 @@ helm repo update
 helm install ollaya ollaya/ollaya
 
 # or OCI (no repo add)
-helm install ollaya oci://ghcr.io/teochenglim/charts/ollaya --version 0.1.1
+helm install ollaya oci://ghcr.io/teochenglim/charts/ollaya --version 0.1.2
 ```
 
 ```sh
@@ -179,12 +179,10 @@ Workflows (all actions are pinned to commit SHAs):
 
 ```sh
 git remote add origin git@github.com:teochenglim/ollaya.git   # already set
-# Pages helm repo needs an (empty) gh-pages branch:
-git switch --orphan gh-pages && git commit --allow-empty -m "init pages" && git push -u origin gh-pages
-git switch main
+# The gh-pages branch is created automatically by helm.yml on its first run.
 ```
 
-Then in GitHub: **Settings → Pages** → source `gh-pages` branch. After the first image publish,
+Then in GitHub, after that first run: **Settings → Pages** → source `gh-pages` branch. After the first image publish,
 **Packages → ollaya → Package settings → Change visibility → Public**, and link it to this repo
 (same for the `charts/ollaya` package). Anonymous `docker pull` / `helm install` fails until then.
 Under **Settings → Actions → General**, workflow permissions must allow read & write.

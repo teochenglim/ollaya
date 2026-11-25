@@ -31,6 +31,18 @@ jobs:
       - uses: azure/setup-helm@2f5e7bc67f1f9972ab16657bb795f36d8f04de0e # v5.1.0
       - run: helm lint charts/ollaya
 
+      # chart-releaser needs origin/gh-pages to exist. Create it (empty root commit) on first run,
+      # without touching the working tree.
+      - name: Ensure gh-pages branch exists
+        run: |
+          set -eu
+          if ! git ls-remote --exit-code --heads origin gh-pages >/dev/null 2>&1; then
+            empty_tree=$(git hash-object -t tree /dev/null)
+            c=$(git commit-tree "$empty_tree" -m "init gh-pages")
+            git push origin "$c:refs/heads/gh-pages"
+          fi
+          git fetch origin gh-pages
+
       - name: Release to GitHub Pages helm repo
         uses: helm/chart-releaser-action@92c6b97fa9f664492a2592e0d1d80bc6bf378957 # v1.9.0
         env:
