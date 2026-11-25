@@ -1,0 +1,70 @@
+image:
+  repository: ghcr.io/teochenglim/ollaya
+  # Defaults to the chart appVersion. GPU adds the suffix automatically (see gpu.variant).
+  tag: ""
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+# GPU: requires the NVIDIA device plugin (or GPU Operator) in the cluster.
+gpu:
+  enabled: false
+  variant: cuda        # cuda (CUDA 13, driver R580+) | cuda12 (driver R525+)
+  count: 1
+  runtimeClassName: "" # e.g. nvidia, if your cluster needs it
+
+# Hugging Face token for private/gated weights. NEVER put it in the image.
+# Preferred: reference an existing Secret. Or let the chart create one (value ends up in Helm release state).
+huggingface:
+  existingSecret: ""   # name of a Secret
+  existingSecretKey: token
+  token: ""            # creates a Secret "<release>-hf" if set and existingSecret is empty
+  # Sent as OLLAYA_HF_TOKEN (never forwarded to mirrors or the ollaya.dev registry).
+  endpoint: ""         # optional OLLAYA_HF_ENDPOINT (mirror)
+
+# Optional API key clients must send as "Authorization: Bearer <key>".
+apiKey:
+  existingSecret: ""
+  existingSecretKey: key
+  value: ""
+
+ollaya:
+  preload: ""          # e.g. "laya:en,laya:multilingual" (readiness waits for these)
+  readOnly: false      # refuse pull/create/delete over HTTP (pre-seed the PVC first)
+  keepAlive: ""
+  maxLoadedModels: ""
+  extraEnv: []         # - {name: OLLAYA_LOG, value: debug}
+
+persistence:
+  enabled: true
+  size: 20Gi
+  storageClass: ""
+  accessMode: ReadWriteOnce
+  existingClaim: ""
+
+service:
+  type: ClusterIP
+  port: 11435
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: ollaya.example.com
+      paths: [{path: /, pathType: Prefix}]
+  tls: []
+
+resources:
+  requests: {cpu: 500m, memory: 1Gi}
+  limits: {memory: 4Gi}
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+podSecurityContext: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
+podAnnotations: {}

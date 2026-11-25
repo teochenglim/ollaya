@@ -1,0 +1,52 @@
+name: Publish Helm chart
+
+# Publishes on every push to main that changes charts/** (bump Chart.yaml `version` to release):
+#   1. GitHub Pages repo   -> helm repo add ollaya https://teochenglim.github.io/ollaya
+#   2. OCI on GHCR         -> helm install oci://ghcr.io/teochenglim/charts/ollaya
+#
+# One-time setup: create an empty `gh-pages` branch and enable Pages (see README).
+
+on:
+  push:
+    branches: [main]
+    paths: ["charts/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # chart-releaser: GitHub release + gh-pages index
+      packages: write   # OCI push to GHCR
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - run: |
+          git config user.name "$GITHUB_ACTOR"
+          git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
+      - uses: azure/setup-helm@2f5e7bc67f1f9972ab16657bb795f36d8f04de0e # v5.1.0
+      - run: helm lint charts/ollaya
+
+      - name: Release to GitHub Pages helm repo
+        uses: helm/chart-releaser-action@92c6b97fa9f664492a2592e0d1d80bc6bf378957 # v1.9.0
+        env:
+          CR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          charts_dir: charts
+          skip_existing: true
+
+      - name: Push to GHCR (OCI)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          set -eu
+          owner=$(echo "$OWNER" | tr '[:upper:]' '[:lower:]')
+          echo "$GH_TOKEN" | helm registry login ghcr.io -u "$ACTOR" --password-stdin
+          helm package charts/ollaya -d /tmp/pkg
+          helm push /tmp/pkg/ollaya-*.tgz "oci://ghcr.io/$owner/charts" || echo "version already published, skipping"

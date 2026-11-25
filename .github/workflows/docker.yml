@@ -1,0 +1,118 @@
+name: Publish image to GHCR
+
+# Repackages an upstream Ollaya release (ollaya-dev/ollaya) into a lean image.
+# Trigger: push a tag vX.Y.Z (X.Y.Z = upstream release), or run manually with a version.
+#
+# Tags published (multi-arch manifests, same layout as laya-play):
+#   ghcr.io/<owner>/ollaya:X.Y.Z-cpu     :X.Y.Z-cuda     :X.Y.Z-cuda12
+#   ghcr.io/<owner>/ollaya:X.Y-cpu ...   (minor alias)
+#   ghcr.io/<owner>/ollaya:cpu           :cuda           :cuda12   (moving: newest release)
+#   ghcr.io/<owner>/ollaya:X.Y.Z         :X.Y            :latest   (= cpu)
+# cuda12 is amd64 only (upstream ships no arm64 cuda12 build).
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Upstream Ollaya version without the v (e.g. 0.18.0)"
+        required: true
+
+env:
+  REGISTRY: ghcr.io
+
+permissions:
+  contents: read
+
+jobs:
+  prep:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      minor: ${{ steps.v.outputs.minor }}
+      image: ${{ steps.v.outputs.image }}
+    steps:
+      - id: v
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          REF_NAME: ${{ github.ref_name }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          set -eu
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then v="${INPUT_VERSION#v}"; else v="${REF_NAME#v}"; fi
+          echo "$v" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.]+)?$' || { echo "bad version: $v" >&2; exit 1; }
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "minor=$(echo "$v" | cut -d. -f1,2)" >> "$GITHUB_OUTPUT"
+          echo "image=${REGISTRY}/$(echo "$OWNER" | tr '[:upper:]' '[:lower:]')/ollaya" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: prep
+    runs-on: ${{ matrix.platform == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [cpu, cuda, cuda12]
+        platform: [amd64, arm64]
+        exclude:
+          - {variant: cuda12, platform: arm64}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # Per-arch staging tag, merged below. Not meant to be pulled directly.
+      - name: Build ${{ matrix.variant }} (${{ matrix.platform }})
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          push: true
+          provenance: false
+          sbom: false
+          platforms: linux/${{ matrix.platform }}
+          build-args: |
+            OLLAYA_VERSION=${{ needs.prep.outputs.version }}
+            VARIANT=${{ matrix.variant }}
+          tags: ${{ needs.prep.outputs.image }}:${{ needs.prep.outputs.version }}-${{ matrix.variant }}-${{ matrix.platform }}
+          cache-from: type=gha,scope=${{ matrix.variant }}-${{ matrix.platform }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.variant }}-${{ matrix.platform }}
+
+  merge:
+    needs: [prep, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [cpu, cuda, cuda12]
+    env:
+      IMAGE: ${{ needs.prep.outputs.image }}
+      VERSION: ${{ needs.prep.outputs.version }}
+      MINOR: ${{ needs.prep.outputs.minor }}
+      VARIANT: ${{ matrix.variant }}
+    steps:
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Merge per-arch images into multi-arch tags
+        run: |
+          set -eu
+          srcs="$IMAGE:$VERSION-$VARIANT-amd64"
+          [ "$VARIANT" = "cuda12" ] || srcs="$srcs $IMAGE:$VERSION-$VARIANT-arm64"
+          tags="-t $IMAGE:$VERSION-$VARIANT -t $IMAGE:$MINOR-$VARIANT -t $IMAGE:$VARIANT"
+          if [ "$VARIANT" = "cpu" ]; then tags="$tags -t $IMAGE:$VERSION -t $IMAGE:$MINOR -t $IMAGE:latest"; fi
+          # shellcheck disable=SC2086
+          docker buildx imagetools create $tags $srcs
+      - name: Show result
+        run: docker buildx imagetools inspect "$IMAGE:$VERSION-$VARIANT"

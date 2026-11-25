@@ -1,0 +1,110 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ollaya.fullname" . }}
+  labels: {{- include "ollaya.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  # RWO model store: never run two pods against it at once.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels: {{- include "ollaya.selector" . | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "ollaya.selector" . | nindent 8 }}
+      {{- with .Values.podAnnotations }}
+      annotations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if .Values.gpu.runtimeClassName }}
+      runtimeClassName: {{ .Values.gpu.runtimeClassName }}
+      {{- end }}
+      securityContext:
+        fsGroup: {{ .Values.securityContext.fsGroup }}
+        {{- with .Values.podSecurityContext }}{{ toYaml . | nindent 8 }}{{- end }}
+      containers:
+        - name: ollaya
+          image: {{ include "ollaya.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["serve"]
+          securityContext:
+            runAsNonRoot: {{ .Values.securityContext.runAsNonRoot }}
+            runAsUser: {{ .Values.securityContext.runAsUser }}
+            runAsGroup: {{ .Values.securityContext.runAsGroup }}
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+          ports:
+            - {name: http, containerPort: 11435}
+          env:
+            - {name: OLLAYA_HOST, value: "0.0.0.0:11435"}
+            {{- with .Values.ollaya.preload }}
+            - {name: OLLAYA_PRELOAD, value: {{ . | quote }}}
+            {{- end }}
+            {{- if .Values.ollaya.readOnly }}
+            - {name: OLLAYA_READ_ONLY, value: "1"}
+            {{- end }}
+            {{- with .Values.ollaya.keepAlive }}
+            - {name: OLLAYA_KEEP_ALIVE, value: {{ . | quote }}}
+            {{- end }}
+            {{- with .Values.ollaya.maxLoadedModels }}
+            - {name: OLLAYA_MAX_LOADED_MODELS, value: {{ . | quote }}}
+            {{- end }}
+            {{- with .Values.huggingface.endpoint }}
+            - {name: OLLAYA_HF_ENDPOINT, value: {{ . | quote }}}
+            {{- end }}
+            {{- if include "ollaya.hfSecretName" . }}
+            - name: OLLAYA_HF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "ollaya.hfSecretName" . }}
+                  key: {{ .Values.huggingface.existingSecretKey }}
+            {{- end }}
+            {{- if include "ollaya.apiSecretName" . }}
+            - name: OLLAYA_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "ollaya.apiSecretName" . }}
+                  key: {{ .Values.apiKey.existingSecretKey }}
+            {{- end }}
+            {{- with .Values.ollaya.extraEnv }}{{ toYaml . | nindent 12 }}{{- end }}
+          # GET / = liveness; /api/ready waits for OLLAYA_PRELOAD models.
+          livenessProbe:
+            httpGet: {path: /, port: http}
+            periodSeconds: 30
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet: {path: /api/ready, port: http}
+            periodSeconds: 10
+          startupProbe:
+            httpGet: {path: /, port: http}
+            periodSeconds: 5
+            failureThreshold: 60
+          resources:
+            {{- $r := deepCopy .Values.resources }}
+            {{- if .Values.gpu.enabled }}
+            {{- $_ := set $r "limits" (merge (default dict $r.limits) (dict "nvidia.com/gpu" .Values.gpu.count)) }}
+            {{- end }}
+            {{- toYaml $r | nindent 12 }}
+          volumeMounts:
+            - {name: data, mountPath: /home/ollaya/.ollaya}
+      volumes:
+        - name: data
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.persistence.existingClaim | default (include "ollaya.fullname" .) }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity: {{- toYaml . | nindent 8 }}
+      {{- end }}

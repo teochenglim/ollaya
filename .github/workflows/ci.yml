@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  dockerfile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: hadolint/hadolint-action@06be81baf89a55ffd0e24b8f04a4185738dd3387 # v3.5.0
+        with:
+          dockerfile: Dockerfile
+          failure-threshold: warning
+
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Build CPU image (verifies upstream sha256 too)
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          load: true
+          tags: ollaya:ci
+          cache-from: type=gha,scope=ci
+          cache-to: type=gha,mode=max,scope=ci
+      - name: Run and wait for healthy
+        run: |
+          docker run -d --name o -p 11435:11435 ollaya:ci
+          for i in $(seq 1 30); do
+            [ "$(docker inspect -f '{{.State.Health.Status}}' o)" = healthy ] && break
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:11435/ | grep -q 'Ollaya is running'
+          docker run --rm ollaya:ci --version || true
+          docker image ls ollaya:ci
+          docker rm -f o
+
+  helm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: azure/setup-helm@2f5e7bc67f1f9972ab16657bb795f36d8f04de0e # v5.1.0
+      - name: Lint + render every mode
+        run: |
+          helm lint charts/ollaya
+          helm template t charts/ollaya >/dev/null
+          helm template t charts/ollaya --set gpu.enabled=true --set huggingface.token=x --set apiKey.value=y \
+            | grep -E 'OLLAYA_HF_TOKEN|nvidia.com/gpu|image:'
+          helm template t charts/ollaya --set huggingface.existingSecret=hf >/dev/null

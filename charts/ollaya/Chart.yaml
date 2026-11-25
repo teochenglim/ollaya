@@ -1,0 +1,11 @@
+apiVersion: v2
+name: ollaya
+description: Ollaya decision-model server (typed, calibrated decisions for agents)
+type: application
+version: 0.1.0
+appVersion: "0.18.0"
+home: https://github.com/teochenglim/ollaya
+sources:
+  - https://github.com/teochenglim/ollaya
+  - https://github.com/ollaya-dev/ollaya
+keywords: [ollaya, decision-models, llm, agents]

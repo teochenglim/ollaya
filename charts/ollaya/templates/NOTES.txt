@@ -1,0 +1,12 @@
+Ollaya {{ .Chart.AppVersion }} is starting ({{ include "ollaya.image" . }}).
+
+  kubectl port-forward svc/{{ include "ollaya.fullname" . }} 11435:{{ .Values.service.port }}
+  curl http://127.0.0.1:11435/            # -> "Ollaya is running"
+
+Pull a model into the persistent volume:
+  kubectl exec deploy/{{ include "ollaya.fullname" . }} -- ollaya pull laya
+{{- if not (include "ollaya.hfSecretName" .) }}
+
+No Hugging Face token set. Public models work; for private/gated weights use
+  --set huggingface.existingSecret=<secret>   (key: {{ .Values.huggingface.existingSecretKey }})
+{{- end }}
