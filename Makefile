@@ -20,12 +20,21 @@ CHOICE  = {"model":"laya","state":"$(STATE)","questions":{"team":{"type":"choice
 POST = curl -s -m 60 $(AUTH) -H 'Content-Type: application/json' -d
 
 .DEFAULT_GOAL := help
-.PHONY: progress help demo build up up-ghcr wait test test-alive test-noul test-score test-choice test-decisions test-models down status logs docker-demo docker-up docker-test docker-down
+.PHONY: models pull hints progress help demo build up up-ghcr wait test test-alive test-noul test-score test-choice test-decisions test-models down status logs docker-demo docker-up docker-test docker-down
 
 help: ## show this list
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-16s %s\n", $$1, $$2}'
 
-demo: build up wait test ## EVERYTHING: build image, deploy to k8s, wait, run all tests
+demo: build up wait test hints ## EVERYTHING: build image, deploy to k8s, wait, run all tests
+
+hints:
+	@echo
+	@echo "=============================================================="
+	@echo " Ollaya is up:  $(URL)"
+	@echo "   try one:   make test-noul | test-score | test-choice"
+	@echo "   watch:     make logs        look:  make status"
+	@echo "   clean up:  make down        (also deletes the model volume)"
+	@echo "=============================================================="
 
 build: ## build the image locally (needs docker; k8s must use the docker runtime, e.g. colima)
 	docker build -t $(LOCAL_IMG) .
@@ -75,6 +84,13 @@ progress: ## is it stuck? pod state + how many MB the model download has reached
 	@kubectl -n $(NS) exec deploy/$(REL) -c pull-models -- du -sm /home/ollaya/.ollaya 2>/dev/null | awk '{print "model volume: " $$1 " MB (laya = en + multilingual, ~1.5-2 GB total)"}' \
 	  || echo "init container finished (or not started): see 'make status'"
 	@kubectl -n $(NS) logs deploy/$(REL) -c pull-models --tail=3 2>/dev/null || true
+
+models: ## list the models stored on the server (kubectl exec -> ollaya ls)
+	kubectl -n $(NS) exec deploy/$(REL) -c ollaya -- ollaya ls
+
+pull: ## add a model:  make pull MODEL=winnow:e4b   (check PVC size + memory first, see README)
+	@test -n "$(MODEL)" || { echo "usage: make pull MODEL=<name>   e.g. MODEL=nli"; exit 1; }
+	kubectl -n $(NS) exec deploy/$(REL) -c ollaya -- ollaya pull $(MODEL)
 
 status: ## pods, service, volume
 	kubectl -n $(NS) get pods,svc,pvc

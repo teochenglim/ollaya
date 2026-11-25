@@ -1,0 +1,76 @@
+name: Watch upstream releases
+
+# Daily: if ollaya-dev/ollaya has a newer release than appVersion, open a PR that bumps the
+# Dockerfile default, Chart.yaml (appVersion + chart patch version) and the README examples.
+# After you merge it: `git tag vX.Y.Z && git push origin vX.Y.Z` publishes the images.
+#
+# One-time: Settings -> Actions -> General -> "Allow GitHub Actions to create and approve
+# pull requests". PRs opened with GITHUB_TOKEN do not trigger ci.yml; close and reopen the PR
+# (or use a PAT in the UPSTREAM_PAT secret) to run CI on it.
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      GH_TOKEN: ${{ secrets.UPSTREAM_PAT || secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Find newer upstream release
+        id: up
+        run: |
+          set -eu
+          tag=$(gh api repos/ollaya-dev/ollaya/releases/latest --jq .tag_name)   # excludes drafts/pre-releases
+          latest="${tag#v}"
+          current=$(sed -n 's/^appVersion: "\(.*\)"/\1/p' charts/ollaya/Chart.yaml)
+          echo "upstream=$latest current=$current"
+          echo "latest=$latest" >> "$GITHUB_OUTPUT"
+          if [ "$latest" != "$current" ] && [ "$(printf '%s\n%s\n' "$current" "$latest" | sort -V | tail -1)" = "$latest" ]; then
+            # the image build needs these assets
+            assets=$(gh api "repos/ollaya-dev/ollaya/releases/tags/$tag" --jq '[.assets[].name]|join(" ")')
+            for a in sha256sum.txt ollaya-linux-amd64.tar.zst ollaya-linux-arm64.tar.zst; do
+              case " $assets " in *" $a "*) ;; *) echo "upstream $tag is missing $a; not bumping yet"; echo "newer=false" >> "$GITHUB_OUTPUT"; exit 0;; esac
+            done
+            echo "newer=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "newer=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Open a bump PR
+        if: steps.up.outputs.newer == 'true'
+        env:
+          LATEST: ${{ steps.up.outputs.latest }}
+        run: |
+          set -eu
+          branch="bump/ollaya-$LATEST"
+          if git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
+            echo "branch $branch already exists; PR already open or merged"; exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          chart=$(scripts/bump-upstream.sh "$LATEST")
+          git add -A
+          git commit -m "Bump Ollaya to $LATEST (chart $chart)"
+          git push origin "$branch"
+          gh pr create --base main --head "$branch" \
+            --title "Bump Ollaya to $LATEST" \
+            --body "Upstream release: https://github.com/ollaya-dev/ollaya/releases/tag/v$LATEST
+
+          Bumps the Dockerfile default, chart appVersion (chart version now $chart) and README examples.
+
+          After merging:
+          \`\`\`sh
+          git tag v$LATEST && git push origin v$LATEST
+          \`\`\`"

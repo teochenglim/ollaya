@@ -13,10 +13,12 @@ gpu:
   runtimeClassName: "" # e.g. nvidia, if your cluster needs it
 
 # Optional API key clients must send as "Authorization: Bearer <key>".
+# Strongly recommended with service.type NodePort/LoadBalancer or ingress.enabled.
 apiKey:
-  existingSecret: ""
+  generate: false      # true: create a random key once (kept across upgrades); NOTES shows how to read it
+  existingSecret: ""   # or reference your own Secret
   existingSecretKey: key
-  value: ""
+  value: ""            # or set it inline (ends up in Helm release state)
 
 ollaya:
   # Models to pull into the PVC on pod start (init container; skips ones already present).

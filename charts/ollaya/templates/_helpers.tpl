@@ -24,5 +24,5 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 
 {{- define "ollaya.apiSecretName" -}}
 {{- if .Values.apiKey.existingSecret -}}{{ .Values.apiKey.existingSecret }}
-{{- else if .Values.apiKey.value -}}{{ include "ollaya.fullname" . }}-api{{- end -}}
+{{- else if or .Values.apiKey.value .Values.apiKey.generate -}}{{ include "ollaya.fullname" . }}-api{{- end -}}
 {{- end -}}

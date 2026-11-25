@@ -8,3 +8,14 @@ Ollaya {{ .Chart.AppVersion }} is starting ({{ include "ollaya.image" . }}).
 
 Models are pulled on pod start from ollaya.models ({{ join ", " .Values.ollaya.models }}).
 Add one now:  kubectl exec deploy/{{ include "ollaya.fullname" . }} -- ollaya pull <model>
+
+{{- if include "ollaya.apiSecretName" . }}
+
+API key is ON. Read it with:
+  kubectl -n {{ .Release.Namespace }} get secret {{ include "ollaya.apiSecretName" . }} -o jsonpath='{.data.{{ .Values.apiKey.existingSecretKey }}}' | base64 -d; echo
+Send it as:  -H "Authorization: Bearer <key>"
+{{- else if or (ne .Values.service.type "ClusterIP") .Values.ingress.enabled }}
+
+WARNING: Ollaya is reachable from outside the pod network WITHOUT an API key: anyone who can
+reach it can run, pull and delete models. Fix:  helm upgrade ... --set apiKey.generate=true
+{{- end }}
