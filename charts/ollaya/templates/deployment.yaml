@@ -71,13 +71,14 @@ spec:
                   key: {{ .Values.apiKey.existingSecretKey }}
             {{- end }}
             {{- with .Values.ollaya.extraEnv }}{{ toYaml . | nindent 12 }}{{- end }}
-          # GET / = liveness; /api/ready waits for OLLAYA_PRELOAD models.
+          # GET / = liveness. /api/ready only exists when OLLAYA_PRELOAD is set (404 otherwise),
+          # where it waits for the preloaded models; without preload, readiness uses GET /.
           livenessProbe:
             httpGet: {path: /, port: http}
             periodSeconds: 30
             timeoutSeconds: 5
           readinessProbe:
-            httpGet: {path: /api/ready, port: http}
+            httpGet: {path: {{ if .Values.ollaya.preload }}/api/ready{{ else }}/{{ end }}, port: http}
             periodSeconds: 10
           startupProbe:
             httpGet: {path: /, port: http}

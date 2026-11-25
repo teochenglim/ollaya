@@ -104,8 +104,8 @@ helm install ollaya ollaya/ollaya \
 ```
 
 The chart runs one replica (`Recreate`) because the model store is a ReadWriteOnce PVC, which is
-kept on `helm uninstall` so models aren't re-downloaded. Readiness uses `/api/ready`, which waits
-for `ollaya.preload` models. See [values.yaml](charts/ollaya/values.yaml) for every option
+kept on `helm uninstall` so models aren't re-downloaded. With `ollaya.preload` set, readiness uses
+`/api/ready` (waits for those models to load); otherwise it uses `/`. See [values.yaml](charts/ollaya/values.yaml) for every option
 (ingress, resources, tolerations, extra env …).
 
 ## Hugging Face token (`HF_TOKEN`)

@@ -42,8 +42,9 @@ persistence:
   existingClaim: ""
 
 service:
-  type: ClusterIP
+  type: ClusterIP      # ClusterIP | NodePort | LoadBalancer
   port: 11435
+  nodePort: null       # with type NodePort, e.g. 30808 (range 30000-32767)
 
 ingress:
   enabled: false
