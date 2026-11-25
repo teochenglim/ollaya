@@ -1,0 +1,23 @@
+apiVersion: v1
+entries:
+  ollaya:
+  - apiVersion: v2
+    appVersion: 0.18.0
+    created: "2026-11-25T01:35:54.462665944Z"
+    description: Ollaya decision-model server (typed, calibrated decisions for agents)
+    digest: fc2773ddc34c70c81887093b4bcabfce156ba64e232eea669200c424041e87ab
+    home: https://github.com/teochenglim/ollaya
+    keywords:
+    - ollaya
+    - decision-models
+    - llm
+    - agents
+    name: ollaya
+    sources:
+    - https://github.com/teochenglim/ollaya
+    - https://github.com/ollaya-dev/ollaya
+    type: application
+    urls:
+    - https://github.com/teochenglim/ollaya/releases/download/ollaya-0.1.2/ollaya-0.1.2.tgz
+    version: 0.1.2
+generated: "2026-11-25T01:35:54.462669672Z"
