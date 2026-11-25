@@ -82,7 +82,7 @@ helm repo update
 helm install ollaya ollaya/ollaya
 
 # or OCI (no repo add)
-helm install ollaya oci://ghcr.io/teochenglim/charts/ollaya --version 0.1.0
+helm install ollaya oci://ghcr.io/teochenglim/charts/ollaya --version 0.1.1
 ```
 
 ```sh
