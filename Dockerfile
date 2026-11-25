@@ -13,6 +13,9 @@ FROM debian:${DEBIAN_RELEASE}-slim AS fetch
 ARG OLLAYA_VERSION=0.18.0
 ARG VARIANT=cpu
 ARG TARGETARCH
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+# Unpinned on purpose: Debian drops old package versions, which would break rebuilds.
+# hadolint ignore=DL3008
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl zstd \
     && rm -rf /var/lib/apt/lists/*
@@ -38,6 +41,7 @@ FROM debian:${DEBIAN_RELEASE}-slim AS runtime
 ARG OLLAYA_UID=1000
 ARG OLLAYA_VERSION=0.18.0
 ARG VARIANT=cpu
+# hadolint ignore=DL3008
 RUN apt-get update \
     && apt-get install -y --no-install-recommends libgomp1 ca-certificates \
     && rm -rf /var/lib/apt/lists/* /var/cache/apt /usr/share/doc /usr/share/man \

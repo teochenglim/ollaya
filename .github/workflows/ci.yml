@@ -33,15 +33,18 @@ jobs:
           cache-to: type=gha,mode=max,scope=ci
       - name: Run and wait for healthy
         run: |
-          docker run -d --name o -p 11435:11435 ollaya:ci
+          docker run -d --name ollaya-smoke -p 11435:11435 ollaya:ci
+          status=starting
           for i in $(seq 1 30); do
-            [ "$(docker inspect -f '{{.State.Health.Status}}' o)" = healthy ] && break
+            status=$(docker inspect -f '{{.State.Health.Status}}' ollaya-smoke)
+            [ "$status" = healthy ] && break
             sleep 2
           done
+          echo "health: $status"
+          if [ "$status" != healthy ]; then docker logs ollaya-smoke; exit 1; fi
           curl -fsS http://127.0.0.1:11435/ | grep -q 'Ollaya is running'
-          docker run --rm ollaya:ci --version || true
           docker image ls ollaya:ci
-          docker rm -f o
+          docker rm -f ollaya-smoke
 
   helm:
     runs-on: ubuntu-latest
