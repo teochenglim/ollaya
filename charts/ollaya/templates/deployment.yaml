@@ -26,6 +26,30 @@ spec:
       securityContext:
         fsGroup: {{ .Values.securityContext.fsGroup }}
         {{- with .Values.podSecurityContext }}{{ toYaml . | nindent 8 }}{{- end }}
+      {{- if .Values.ollaya.models }}
+      initContainers:
+        - name: pull-models
+          image: {{ include "ollaya.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["/bin/bash", "-c"]
+          # Starts a throwaway server on localhost, pulls each model (idempotent), exits.
+          args:
+            - |
+              set -eu
+              export OLLAYA_HOST=127.0.0.1:11435
+              ollaya serve & pid=$!
+              for i in $(seq 1 60); do ollaya ls >/dev/null 2>&1 && break; sleep 1; done
+              for m in {{ join " " .Values.ollaya.models }}; do ollaya pull "$m"; done
+              kill $pid; wait $pid || true
+          securityContext:
+            runAsNonRoot: {{ .Values.securityContext.runAsNonRoot }}
+            runAsUser: {{ .Values.securityContext.runAsUser }}
+            runAsGroup: {{ .Values.securityContext.runAsGroup }}
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: data, mountPath: /home/ollaya/.ollaya}
+      {{- end }}
       containers:
         - name: ollaya
           image: {{ include "ollaya.image" . }}
@@ -52,16 +76,6 @@ spec:
             {{- end }}
             {{- with .Values.ollaya.maxLoadedModels }}
             - {name: OLLAYA_MAX_LOADED_MODELS, value: {{ . | quote }}}
-            {{- end }}
-            {{- with .Values.huggingface.endpoint }}
-            - {name: OLLAYA_HF_ENDPOINT, value: {{ . | quote }}}
-            {{- end }}
-            {{- if include "ollaya.hfSecretName" . }}
-            - name: OLLAYA_HF_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "ollaya.hfSecretName" . }}
-                  key: {{ .Values.huggingface.existingSecretKey }}
             {{- end }}
             {{- if include "ollaya.apiSecretName" . }}
             - name: OLLAYA_API_KEY

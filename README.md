@@ -8,9 +8,8 @@ Lean container images and a Helm chart for [Ollaya](https://github.com/ollaya-de
 > [release](https://github.com/ollaya-dev/ollaya/releases) tarball, **verifies its sha256**, and
 > unpacks it onto `debian:trixie-slim`. Each model keeps its own license.
 
-- [Docker](#docker) · [Helm](#helm) · [Hugging Face token](#hugging-face-token-hf_token) ·
-  [Use it from agents (the skill)](#use-it-from-agents-the-ollaya-decisions-skill) ·
-  [Maintaining / publishing](#maintaining--publishing)
+[Docker](#docker) · [Helm](#helm) · [Test it](#test-it-3-curls) · [Switching models & storage](#switching-models-and-storage) ·
+[Agents (the skill)](#use-it-from-agents-the-ollaya-decisions-skill) · [Contributing](CONTRIBUTING.md)
 
 ## Docker
 
@@ -25,28 +24,23 @@ in production.
 
 ```sh
 # CPU
-docker run -it --rm -p 11435:11435 -v ollaya:/home/ollaya/.ollaya ghcr.io/teochenglim/ollaya:latest
+docker run -d --name ollaya -p 11435:11435 -v ollaya:/home/ollaya/.ollaya ghcr.io/teochenglim/ollaya:latest
 
 # NVIDIA GPU (needs the NVIDIA Container Toolkit)
-docker run -it --rm --gpus all -p 11435:11435 -v ollaya:/home/ollaya/.ollaya ghcr.io/teochenglim/ollaya:cuda
-```
+docker run -d --name ollaya --gpus all -p 11435:11435 -v ollaya:/home/ollaya/.ollaya ghcr.io/teochenglim/ollaya:cuda
 
-Then, in another terminal:
-
-```sh
-curl http://127.0.0.1:11435/                                   # "Ollaya is running"
-docker exec <container> ollaya pull laya                       # CPU-friendly router model
-curl -s http://127.0.0.1:11435/v1/systemone -H 'Content-Type: application/json' \
-  -d '{"model":"laya","state":"I was charged twice","questions":{"angry":{"type":"noul"}}}'
+docker exec ollaya ollaya pull laya        # CPU-friendly router model (~850 MB)
 ```
 
 Notes
 - Ollaya's port is **11435** (not 8080). Models live in the `/home/ollaya/.ollaya` volume, so
   mount one or you re-download on every start.
 - Runs as non-root UID 1000. For a bind mount: `chown 1000:1000 ./data`.
-- Env vars: [full list](https://github.com/ollaya-dev/ollaya/blob/main/docs/api.md) — e.g.
+- Env vars: [full list](https://github.com/ollaya-dev/ollaya/blob/main/docs/api.md), e.g.
   `OLLAYA_PRELOAD=laya:en`, `OLLAYA_API_KEY`, `OLLAYA_READ_ONLY=1`, `OLLAYA_DEVICE=cpu|cuda`.
 - Don't expose the port publicly without `OLLAYA_API_KEY` (clients send `Authorization: Bearer …`).
+- Public models need no Hugging Face token. For a private/gated model, pass
+  `-e OLLAYA_HF_TOKEN` (or `HF_TOKEN`) at run time; never bake it into an image.
 
 ### docker compose
 
@@ -58,7 +52,6 @@ services:
     volumes: [ollaya:/home/ollaya/.ollaya]
     environment:
       OLLAYA_PRELOAD: laya:en
-      OLLAYA_HF_TOKEN: ${HF_TOKEN:-}   # optional, see below
     # GPU: image :0.18.0-cuda plus
     # deploy: {resources: {reservations: {devices: [{driver: nvidia, count: all, capabilities: [gpu]}]}}}
 volumes:
@@ -82,56 +75,83 @@ helm repo update
 helm install ollaya ollaya/ollaya
 
 # or OCI (no repo add)
-helm install ollaya oci://ghcr.io/teochenglim/charts/ollaya --version 0.1.2
+helm install ollaya oci://ghcr.io/teochenglim/charts/ollaya --version 0.1.3
 ```
 
+The default install pulls `laya` into the volume on first start (init container), then serves.
+
 ```sh
-kubectl port-forward svc/ollaya 11435:11435
-kubectl exec deploy/ollaya -- ollaya pull laya
+kubectl port-forward svc/ollaya 11435:11435      # or expose a NodePort, below
 ```
 
 Common installs:
 
 ```sh
-# GPU (needs NVIDIA device plugin / GPU Operator); picks the :<ver>-cuda image + nvidia.com/gpu limit
+# Reachable from outside the cluster on a NodePort
+helm install ollaya ollaya/ollaya --set service.type=NodePort --set service.nodePort=30808
+
+# GPU (needs NVIDIA device plugin / GPU Operator): picks the :<ver>-cuda image + nvidia.com/gpu limit
 helm install ollaya ollaya/ollaya --set gpu.enabled=true            # gpu.variant=cuda12 for older drivers
 
-# Warm models at start, API key from an existing Secret, bigger volume
-helm install ollaya ollaya/ollaya \
-  --set ollaya.preload="laya:en\,laya:multilingual" \
-  --set apiKey.existingSecret=ollaya-api \
-  --set persistence.size=50Gi
+# API key from an existing Secret (recommended if reachable by anyone else)
+kubectl create secret generic ollaya-api --from-literal=key=change-me
+helm install ollaya ollaya/ollaya --set apiKey.existingSecret=ollaya-api
 ```
 
-The chart runs one replica (`Recreate`) because the model store is a ReadWriteOnce PVC, which is
-kept on `helm uninstall` so models aren't re-downloaded. With `ollaya.preload` set, readiness uses
-`/api/ready` (waits for those models to load); otherwise it uses `/`. See [values.yaml](charts/ollaya/values.yaml) for every option
-(ingress, resources, tolerations, extra env …).
+Every option (ingress, resources, tolerations, extra env …) is in
+[values.yaml](charts/ollaya/values.yaml).
 
-## Hugging Face token (`HF_TOKEN`)
+## Test it (3 curls)
 
-Public models need **no token**. Set one only for private/gated weights (or to avoid rate limits).
-Ollaya reads `OLLAYA_HF_TOKEN`, and falls back to `HF_TOKEN`. It sends the token **only to
-huggingface.co** (never to a mirror set via `OLLAYA_HF_ENDPOINT`, never to the ollaya.dev
-registry). `OLLAYA_HF_TOKEN` is preferred: with a mirror, `HF_TOKEN` is not forwarded to it.
-
-The token is never baked into an image; it is only supplied at run time:
+Use `http://127.0.0.1:11435` for Docker or a port-forward, or `http://<node-ip>:30808` for the
+NodePort example. If you set an API key, add `-H 'Authorization: Bearer <key>'`.
 
 ```sh
-# Docker: forward from your shell without putting it on the command line
-export OLLAYA_HF_TOKEN=hf_xxx
-docker run -e OLLAYA_HF_TOKEN -p 11435:11435 -v ollaya:/home/ollaya/.ollaya ghcr.io/teochenglim/ollaya:latest
+H=http://127.0.0.1:11435
+B='{"model":"laya","state":"I was charged twice and want a refund now!","questions":{"urgent":{"type":"noul"}}}'
 
-# Kubernetes (recommended): existing Secret
-kubectl create secret generic ollaya-hf --from-literal=token=hf_xxx
-helm install ollaya ollaya/ollaya --set huggingface.existingSecret=ollaya-hf
+# 1. TypeSafe-compatible "System One" decision
+curl -s $H/v1/systemone -H 'Content-Type: application/json' -d "$B"
 
-# Kubernetes (convenience): chart creates the Secret. The value is stored in Helm release state.
-helm install ollaya ollaya/ollaya --set huggingface.token=hf_xxx
+# 2. Alias of the above
+curl -s $H/v1/decisions -H 'Content-Type: application/json' -d "$B"
+
+# 3. List the models on this server (GET, no body)
+curl -s $H/v1/models
 ```
 
-Tip: after the models are pulled once, run with `OLLAYA_READ_ONLY=1` (`--set ollaya.readOnly=true`)
-and drop the token entirely.
+The decisions return a calibrated answer per question, e.g.
+`{"model":"laya:en","answers":{"urgent":{"type":"noul","noul":0.92}},…}` (`noul` is the
+probability the statement is true). `/v1/models` is empty until a model is pulled. Liveness:
+`curl $H/` → `Ollaya is running`. (Ollaya's native endpoint is `POST /api/decide`, same body.)
+
+With a checkout of this repo, `make` lists one test per question type, so you can run just one:
+`make test-noul` (yes/no), `make test-score` (rating), `make test-choice` (pick one),
+`make test-decisions`, `make test-models`, or `make test` for all of them
+(`HOST=… NODEPORT=… API_KEY=…` to point it elsewhere).
+
+## Switching models and storage
+
+Ollaya serves **many models from one server**. Each request names its model (`"model":"…"`);
+models load on demand and unload after `keep_alive` (default 5 min). `OLLAYA_MAX_LOADED_MODELS`
+(default 3) caps how many sit in RAM at once. No restart or redeploy is needed to use another model.
+
+| Do this | Docker | Helm |
+|---|---|---|
+| Add a model | `docker exec ollaya ollaya pull winnow:e4b` | edit `ollaya.models` and `helm upgrade` (init container pulls what's missing), or `kubectl exec deploy/ollaya -- ollaya pull …` |
+| List / remove | `ollaya ls` / `ollaya rm <m>` (`DELETE /api/delete`) | same, via `kubectl exec` |
+| Keep one hot | `-e OLLAYA_PRELOAD=laya:en` | `--set ollaya.preload=laya:en` |
+| Lock after seeding | `-e OLLAYA_READ_ONLY=1` | `--set ollaya.readOnly=true` |
+
+Storage and memory (Kubernetes):
+- The PVC holds **every model you keep**: `laya:en` is ~0.85 GB, others run 3–8 GB each. Default
+  is `20Gi`; set `persistence.size` for your list. Shrinking later isn't supported by most CSI drivers.
+- It's `ReadWriteOnce`, so the chart runs **one replica** (`Recreate` strategy). It is **kept on
+  `helm uninstall`** so models aren't re-downloaded; delete it yourself to reclaim space.
+- Memory limit must fit your biggest model × models loaded at once (default `8Gi`); too low means
+  the pod is OOM-killed on load. Set `resources.limits.memory`.
+- Without persistence (`persistence.enabled=false`) models live in an `emptyDir` and re-download
+  on every pod restart.
 
 ## Use it from agents: the `ollaya-decisions` skill
 
@@ -151,13 +171,12 @@ npx skills add ollaya-dev/ollaya --skill ollaya-decisions
 
 | How | Command |
 |---|---|
-| **HTTP** to Docker (simplest) | `docker run -d -p 127.0.0.1:11435:11435 -v ollaya:/home/ollaya/.ollaya ghcr.io/teochenglim/ollaya` then `docker exec <c> ollaya pull laya`. The skill's `curl http://127.0.0.1:11435/v1/systemone …` calls just work. |
-| **HTTP** to Kubernetes | `kubectl port-forward svc/ollaya 11435:11435` (or an Ingress + `OLLAYA_API_KEY`). |
+| **HTTP** to Docker (simplest) | run the container as above and `ollaya pull laya`. The skill's `curl http://127.0.0.1:11435/v1/systemone …` calls just work. |
+| **HTTP** to Kubernetes | `kubectl port-forward svc/ollaya 11435:11435`, or a NodePort/Ingress with `OLLAYA_API_KEY`. |
 | **MCP** (`decide` tool) | `claude mcp add ollaya -- docker run -i --rm -v ollaya:/home/ollaya/.ollaya ghcr.io/teochenglim/ollaya:latest mcp` |
 
-Check it works: ask your agent to "triage this message with ollaya" — it should call the `decide`
-tool (or `ollaya run laya --preset triage …`). Models must be pulled first
-(`ollaya pull laya`), or `OLLAYA_PRELOAD=laya:en` on the server.
+Check it works: ask your agent to "triage this message with ollaya". It should call the `decide`
+tool (or `ollaya run laya --preset triage …`). Models must be pulled first.
 
 > The MCP-over-`docker run` line starts a *separate* server inside that one-off container. If you
 > already run a long-lived server and want `ollaya mcp` to use it, install the binary locally
@@ -165,38 +184,9 @@ tool (or `ollaya run laya --preset triage …`). Models must be pulled first
 > (plus `OLLAYA_API_KEY` if enabled). Upstream documents `OLLAYA_HOST` as the client's target;
 > verify `ollaya mcp` honours it in your version.
 
-## Maintaining / publishing
+## Contributing / releasing
 
-Workflows (all actions are pinned to commit SHAs):
-
-| Workflow | Trigger | Does |
-|---|---|---|
-| [ci.yml](.github/workflows/ci.yml) | PR / push to `main` | hadolint, builds the CPU image (checks upstream sha256), starts it and waits for healthy, `helm lint` + renders every mode |
-| [docker.yml](.github/workflows/docker.yml) | tag `vX.Y.Z` or manual | builds `cpu`/`cuda`/`cuda12` per-arch on native runners, merges into multi-arch tags on GHCR |
-| [helm.yml](.github/workflows/helm.yml) | push to `main` touching `charts/**` | publishes the chart to GitHub Pages **and** `oci://ghcr.io/teochenglim/charts` |
-
-### One-time setup
-
-```sh
-git remote add origin git@github.com:teochenglim/ollaya.git   # already set
-# The gh-pages branch is created automatically by helm.yml on its first run.
-```
-
-Then in GitHub, after that first run: **Settings → Pages** → source `gh-pages` branch. After the first image publish,
-**Packages → ollaya → Package settings → Change visibility → Public**, and link it to this repo
-(same for the `charts/ollaya` package). Anonymous `docker pull` / `helm install` fails until then.
-Under **Settings → Actions → General**, workflow permissions must allow read & write.
-
-### Release a new upstream version
-
-```sh
-# 1. bump chart appVersion (and Chart.yaml `version`), and the Dockerfile default OLLAYA_VERSION
-# 2. commit, push to main (publishes the chart), then:
-git tag v0.19.0 && git push origin v0.19.0     # publishes the images
-```
-
-Or run **Actions → Publish image to GHCR → Run workflow** with a version, without a tag.
-The tag's `X.Y.Z` must match an existing upstream release (`ollaya-dev/ollaya`).
+Maintainer docs (CI, one-time GitHub setup, cutting a release) are in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 

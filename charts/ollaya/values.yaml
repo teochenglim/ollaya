@@ -12,15 +12,6 @@ gpu:
   count: 1
   runtimeClassName: "" # e.g. nvidia, if your cluster needs it
 
-# Hugging Face token for private/gated weights. NEVER put it in the image.
-# Preferred: reference an existing Secret. Or let the chart create one (value ends up in Helm release state).
-huggingface:
-  existingSecret: ""   # name of a Secret
-  existingSecretKey: token
-  token: ""            # creates a Secret "<release>-hf" if set and existingSecret is empty
-  # Sent as OLLAYA_HF_TOKEN (never forwarded to mirrors or the ollaya.dev registry).
-  endpoint: ""         # optional OLLAYA_HF_ENDPOINT (mirror)
-
 # Optional API key clients must send as "Authorization: Bearer <key>".
 apiKey:
   existingSecret: ""
@@ -28,6 +19,9 @@ apiKey:
   value: ""
 
 ollaya:
+  # Models to pull into the PVC on pod start (init container; skips ones already present).
+  # Change this list + `helm upgrade` to switch models; no image change needed.
+  models: [laya]
   preload: ""          # e.g. "laya:en,laya:multilingual" (readiness waits for these)
   readOnly: false      # refuse pull/create/delete over HTTP (pre-seed the PVC first)
   keepAlive: ""
@@ -56,8 +50,9 @@ ingress:
   tls: []
 
 resources:
-  requests: {cpu: 500m, memory: 1Gi}
-  limits: {memory: 4Gi}
+  # Size memory for your largest model x OLLAYA_MAX_LOADED_MODELS (jeb:4b ~4.6GB, winnow:e4b ~8GB).
+  requests: {cpu: 500m, memory: 2Gi}
+  limits: {memory: 8Gi}
 
 securityContext:
   runAsNonRoot: true

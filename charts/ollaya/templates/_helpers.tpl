@@ -22,11 +22,6 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- else -}}{{ printf "%s:%s" .Values.image.repository $tag }}{{- end -}}
 {{- end -}}
 
-{{- define "ollaya.hfSecretName" -}}
-{{- if .Values.huggingface.existingSecret -}}{{ .Values.huggingface.existingSecret }}
-{{- else if .Values.huggingface.token -}}{{ include "ollaya.fullname" . }}-hf{{- end -}}
-{{- end -}}
-
 {{- define "ollaya.apiSecretName" -}}
 {{- if .Values.apiKey.existingSecret -}}{{ .Values.apiKey.existingSecret }}
 {{- else if .Values.apiKey.value -}}{{ include "ollaya.fullname" . }}-api{{- end -}}
